@@ -1,0 +1,4 @@
+Một suố luồng nghiệp vụ đặc biệt:
+- Bán xử lý: Lấy thông tin CK, tiền, rổ trên persist
+- Đồng bộ rổ trong ngày 5503: gen data lên db persist, HFT service nhận msg đồng bộ sẽ loadcache từ persist lên timesten
+- Đánh dấu lại room 0111: Xóa bảng đánh dấu room trên persist, thực hiện đánh dấu lại room theo BO, đồng bộ lại các bảng đánh dấu lên persist, HFT service loadcache lên timesten

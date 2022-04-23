@@ -1,0 +1,146 @@
+1.M-OMS: Ứng dụng đọc giá phiên cập nhật vào các oms
+	+ Config call aapi ors servervice
+		#Persistent configuration
+		Camel.Rest.Persist=netty-http:http://192.168.1.86:8582
+		Camel.Rest.Persist.Adv=${Camel.Rest.Persist}/oms-api/updateAdv?requestTimeout=${Camel.rest.timeout} 
+		-->Chưa dùng
+		Camel.Rest.Persist.Stock=${Camel.Rest.Persist}/oms-api/updatePrice?synchronous=true&requestTimeout=${Camel.rest.timeout} 
+		--> Update giá Oracle.Command.updatePrice=cspks_fo_trans.sp_update_price_oms
+		Camel.Rest.Persist.Market=${Camel.Rest.Persist}/orssvr/session?synchronous=true&requestTimeout=${Camel.rest.timeout}
+		--> Update phiên  Oracle.Command.SessionUpdate=cspks_fo_trans.sp_Set_Session 
+	+ Config kết nối kafka
+		#Point to Kafka broker
+		Camel.Kafka.Ip=192.168.1.133:9092,192.168.1.134:9092
+		Camel.Kafka.Topic=marketdata
+		Camel.Kafka.Url=kafka:${Camel.Kafka.Topic}?brokers=${Camel.Kafka.Ip}&consumerStreams=1&groupId=${Camel.SystemName}
+    + Cấu trúc dữ liệu thị trường đẩy vào kafka <Hỏi lại anh Dương spec>
+2. BO-OMS: Ứng dụng đồng bộ dữ liệu từ BO (FLEX) -->OMS (Kafka,Data đầu ngày), Lệnh từ OMS (Kafka) -->FLEX
+	+ Đồng bộ dữ liệu đầu ngày sang database BODDATA
+	Camel.Rest.Uri.beginofday=netty-http:http://0.0.0.0:8686/bo-ors/data/beginofday?httpMethodRestrict=POST&bootstrapConfiguration=#nettyHttpBootstrapOptions	
+	bo-ors-sql.properties:
+	Dánh sách dữ liệu đồng bộ: INSTRUMENTS,ACCOUNTS,AFTYPE,PORTFOLIOS,FEE_AFTYPE,SYMBOLCONTRACT,CONTROLLER,BASKETS,WORKINGCALENDAR,DEFRULES,SYSCONFIG
+
+	+ Các api khác
+	Camel.Rest.Cache.TXMap.Uri=netty-http:http://0.0.0.0:8686/bo-ors/cache/txmap?bootstrapConfiguration=#nettyHttpBootstrapOptions
+	Camel.Rest.Resend=netty-http:http://0.0.0.0:8686/oms-api/admin/resend/order2bo?bootstrapConfiguration=#nettyHttpBootstrapOptions
+	Camel.Rest.getMsgPending=netty-http:http://0.0.0.0:8686/oms-api/admin/msg2oms/pending?httpMethodRestrict=GET&bootstrapConfiguration=#nettyHttpBootstrapOptions
+	
+	+ Đồng bộ giao dịch từ BO@ sang OMS
+	Camel.oracle_queue=oracleQueue:queue:HOSTVNDTEST.TXAQS_BO2OMS?concurrentConsumers=2 -->lấy msg từ queue đẩy ra kafka Camel.Kafka1.Topic=OMS-TEST
+	Dùng tool OffsetExplorer2 monitor kafka
+		- Khai báo giao dịch đồng bộ ra oms 
+			select * from ors_tltx_map
+		- Triger tllog đẩy dữ liệu vào bảng event
+			pck_ors.Prc_Trans_Event --> ors_trans_event -->job jenmsg đẩy vào queue và bảng log select * from ors_msg_log  
+			Mẫu msg BO@ <Đây là msg gốc dùng chung cho tất cả các hệ thống ORS,OMS,MO,Notify,...>
+			{
+			  "source": "BO",
+			  "type": "CI",
+			  "checkby": "",
+			  "seq": "15453074",
+			  "status": "1",
+			  "deltd": "N",
+			  "transactionCode": "5801",
+			  "transactionNum": "0001000001",
+			  "effectiveDate": "2019-02-28",
+			  "timestamp": "2022-02-24T10:58:29Z",
+			  "changed": [
+				{
+				  "object": "CI",
+				  "account": "0001013606",
+				  "eventtype": "C",
+				  "dramt": "27300000"
+				},
+				{
+				  "object": "CI",
+				  "account": "0001013606",
+				  "eventtype": "D",
+				  "balance": "27300000",
+				  "remainBalance": ""
+				}
+			  ]
+			}
+		- Đẩy msg ra kafka 
+			*Convert chuyển msg gốc sang msg OMS nhận được sau đó mới đẩy vào kafka
+				Bảng map để phục vụ convert: 
+					select * from oms_txmap
+					select * from oms_txformat
+			*Check log msg ở database master select * from msglog
+			{
+			  "txnum": "0001000015",
+			  "txdate": "2019-02-22",
+			  "action": "A",
+			  "runmode": "DB",
+			  "tlxtcd": "5805",
+			  "detail": [
+				{
+				  "msgtype": "withdrawCI",
+				  "accountId": "0001016989",
+				  "amount": 3848900,
+				  "runmode": "DB"
+				},
+				{
+				  "msgtype": "addAmountCI",
+				  "accountId": "0001051384",
+				  "amount": 3848900,
+				  "runmode": "DB"
+				}
+			  ]
+			}
+	
+
+
+3. OMS-Sync:	Nhận và xử lý msg từ kafka
+
+	+ Giao dịch đồng bộ từ BO@. nhận msg từ mục 2 để call vào ors service
+			Camel.Kafka.Ip=192.168.1.133:9092,192.168.1.134:9092
+			Camel.Kafka.Topic=BO-ORS
+			Camel.KafkaUrl=kafka:${Camel.Kafka.Topic}?brokers=${Camel.Kafka.Ip}&consumerStreams=1&groupId=
+		
+		- Mẫu msg: Như mục 2
+		
+		- Call API: Camel.RestService.BO.Uri=http://127.0.0.1:8582/transaction 
+		
+	+ Giao dịch đồng bộ từ MO
+		- config:
+			Camel.KafkaMO.Ip=192.168.1.133:9092,192.168.1.134:9092
+			Camel.KafkaMO.Topic=morule
+			Camel.KafkaMO.Url=kafka:${Camel.KafkaMO.Topic}?brokers=${Camel.KafkaMO.Ip}&consumerStreams=1&groupId=
+		
+		- Các loại msg: Camel.MO.Filter=pool_status,room_status,pool_accounts,room_accounts,manual_rule,operation_rule
+		- Mẫu msg: select * from mo_msglog_b
+		- Call API:
+			Camel.Rest.MO.Uri=netty-http:http://0.0.0.0:8782/mo/message
+			Camel.RestService.BO.Uri=http://127.0.0.1:8582/transaction
+			Camel.RestService.MO.Uri=http://127.0.0.1:8582/orssvr/trans/mo/addPoolRoom
+		- Thủ tục
+			CSPKS_FO_TRANS.sp_process_poolroom	
+
+4. OMS-Service
+	+ Các giao dịch tăng tiền <Để phục vụ việ đồng bộ>
+		ors-service-trans-setting.properties 
+	
+	+ Các giao dịch giảm tiền
+		- Khai báo trong BO@: select * from oms_txmap where runmod ='NET' --> giao dịch hạch toán giảm tiền từ BO Client
+		- Khái báo cho API : select * from api_call_ors --> Giảm tiền từ BOapi cho online 		
+	
+	+ Các api tra cứu
+		Khai báo trong ors-service-iqr-setting.properties
+	
+	+ Các api phục vụ admin, robot test
+		+ tra cứu, cập nhật số dư tiền ck, queue lệnh,...
+		ors-service-sa-setting.properties
+	
+	+ API xử lý cuối ngày
+	https://docs.fss.com.vn/pages/viewpage.action?pageId=41812996
+		
+		
+		
+		
+		
+		
+	
+	
+	
+	
+	
