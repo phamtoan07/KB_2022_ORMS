@@ -1,3 +1,11 @@
 JMS trong JAVA:
 https://tech-vn.com/jms-la-gi
 http://www.kieutrongkhanh.net/2016/08/gioi-thieu-ve-jms-java-message-services.html
+
+--Camel basic
+https://dzone.com/articles/open-source-integration-apache
+--OSGi:
+https://www.baeldung.com/osgi
+
+--quickfig doc
+https://www.quickfixj.org/javadoc/2.3.0/
